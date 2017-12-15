@@ -501,6 +501,22 @@ def valid_client(**kwargs):
 
     return 'Unknown error in valid_client function'
 
+def client_logged_in(client_iqn):
+    """
+    confirm whether the client is logged in
+    :param iqn: (str) iqn name
+    :return: (bool) True if iqn is logged in
+    """
+
+    lio_root = root.RTSRoot()
+    clients_logged_in = [session['parent_nodeacl'].node_wwn
+                         for session in lio_root.sessions
+                         if session['state'] == 'LOGGED_IN']
+
+    if client_iqn in clients_logged_in:
+        return True
+
+    return False
 
 class GatewayError(Exception):
     pass
