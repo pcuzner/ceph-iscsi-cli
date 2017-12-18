@@ -31,7 +31,8 @@ from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
-                         valid_disk, valid_client, GatewayAPIError)
+                         valid_disk, valid_client, GatewayAPIError,
+                         client_logged_in)
 
 from gwcli.client import Client
 
@@ -969,15 +970,21 @@ def clientlun(client_iqn):
                 "chap": chap}
 
     gateways.insert(0, '127.0.0.1')
+
+    if request.method == 'PUT':
+        http_method = 'put'
+    else:
+        http_method = 'delete'
+
     resp_text, resp_code = call_api(gateways, '_clientlun', client_iqn,
-                                    http_method='put',
+                                    http_method=http_method,
                                     api_vars=api_vars)
 
     return jsonify(message="client masking update {}".format(resp_text)), \
            resp_code
 
 
-@app.route('/api/_clientlun/<client_iqn>', methods=['GET', 'PUT'])
+@app.route('/api/_clientlun/<client_iqn>', methods=['GET', 'PUT', 'DELETE'])
 @requires_restricted_auth
 def _clientlun(client_iqn):
     """
@@ -995,7 +1002,7 @@ def _clientlun(client_iqn):
         else:
             return jsonify(message="Client does not exist"), 404
 
-    else:
+    elif request.method == 'PUT':
         # PUT request = new/updated disks for this client
 
         image_list = request.form['image_list']
@@ -1010,6 +1017,21 @@ def _clientlun(client_iqn):
 
         return jsonify(message=status_text), status_code
 
+    else:
+        # DELETE request = remove disk for this client
+        image_list = request.form['image_list']
+        chap = request.form['chap']
+        committing_host = request.form['committing_host']
+
+        if client_logged_in(client_iqn):
+            return jsonify(message="Unable to delete {}, because"
+                           "'{}' logged in".format(image_list, client_iqn)), 400
+
+        status_code, status_text = _update_client(client_iqn=client_iqn,
+                                                  images=image_list,
+                                                  chap=chap,
+                                                  committing_host=committing_host)
+        return jsonify(message=status_text), status_code
 
 @app.route('/api/client/<client_iqn>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
