@@ -1495,7 +1495,9 @@ def pre_reqs_errors():
     os_info = os.uname()
     this_arch = os_info[-1]
     this_kernel = os_info[2].replace(".{}".format(this_arch), '')
-    this_ver, this_rel = this_kernel.split('-')
+    kernel_dash_idx = this_kernel.find('-')
+    this_ver = this_kernel[:kernel_dash_idx]
+    this_rel = this_kernel[kernel_dash_idx+1:]
 
     # use labelCompare from the rpm module to handle the comparison
     if labelCompare(('1', this_ver, this_rel), ('1', k_vers, k_rel)) < 0:
