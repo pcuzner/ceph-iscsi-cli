@@ -17,6 +17,8 @@ from functools import wraps
 from rpm import labelCompare
 import rados
 
+import pkg_resources
+
 import werkzeug
 from flask import Flask, jsonify, make_response, request
 from rtslib_fb.utils import RTSLibError, normalize_wwn
@@ -28,7 +30,7 @@ from ceph_iscsi_config.lun import LUN
 from ceph_iscsi_config.client import GWClient, CHAP
 from ceph_iscsi_config.common import Config
 from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
-                                     gen_file_hash, valid_rpm)
+                                     gen_file_hash)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
                          valid_disk, valid_client, GatewayAPIError)
@@ -729,7 +731,7 @@ def _disk(image_id):
             lun.allocate()
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
-                return jsonify(message="LUN allocation failure"), 500
+                return jsonify(message=lun.error_msg), 500
 
             if request.form['mode'] == 'create':
                 # new disk is allocated, so refresh the local config object
@@ -1453,57 +1455,30 @@ def call_api(gateway_list, endpoint, element, http_method='put', api_vars=None):
 
 def pre_reqs_errors():
     """
-    function to check pre-req rpms are installed and at the relevant versions
+    function to check pre-req packages are installed and at the relevant version
 
     :return: list of configuration errors detected
     """
 
-    valid_dists = ["redhat"]
-    valid_versions = ['7.4']
-
-    required_rpms = [
-        {"name": "python-rtslib",
-         "version": "2.1.fb64",
-         "release": "0.1"},
-        {"name": "tcmu-runner",
-         "version": "1.3.0",
-         "release": "0.2.3"}
+    errors_found = []
+    required_pkgs = [
+       {"name": "rtslib_fb",
+        "version": "2.1.64"},
+        {"name": "ceph_iscsi_config",
+         "version": "2.3"}
     ]
 
-    k_vers = '3.10.0'
-    k_rel = '823.el7'
+    # We only check these 2 because ceph-iscsi-config via rtslib will check
+    # the kernel and tcmu-runner have support for the needed features we
+    # require dynamically. We can then more easily support distro kernels
+    # with backported tcmu patches.
 
-    errors_found = []
-
-    dist, rel, dist_id = platform.linux_distribution(full_distribution_name=0)
-
-    if dist.lower() in valid_dists:
-        if rel not in valid_versions:
-            errors_found.append("OS version is unsupported")
-
-        # check rpm versions are OK
-        for rpm in required_rpms:
-            if not valid_rpm(rpm):
-                logger.error("RPM check for {} failed")
-                errors_found.append("{} rpm must be installed at >= "
-                                    "{}-{}".format(rpm['name'],
-                                                   rpm['version'],
-                                                   rpm['release']))
-    else:
-        errors_found.append("OS is unsupported")
-
-    # check the running kernel is OK (required kernel has patches to rbd.ko)
-    os_info = os.uname()
-    this_arch = os_info[-1]
-    this_kernel = os_info[2].replace(".{}".format(this_arch), '')
-    this_ver, this_rel = this_kernel.split('-', 1)
-
-    # use labelCompare from the rpm module to handle the comparison
-    if labelCompare(('1', this_ver, this_rel), ('1', k_vers, k_rel)) < 0:
-        logger.error("Kernel version check failed")
-        errors_found.append("Kernel version too old - {}-{} "
-                            "or above needed".format(k_vers,
-                                                     k_rel))
+    for pkg in required_pkgs:
+        version_str = pkg_resources.require(pkg['name'])[0].version
+        version = pkg_resources.parse_version(version_str)
+        if version < pkg_resources.parse_version(pkg['version']):
+            errors_found.append("Found {} {}. {} or newer required.".format(
+                                pkg['name'], version_str, pkg['version']))
 
     return errors_found
 
