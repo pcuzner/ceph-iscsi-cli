@@ -627,6 +627,7 @@ def disk(image_id):
         size = request.form.get('size')
         mode = request.form.get('mode')
         count = request.form.get('count', '1')
+        cmd_time_out = request.form.get('cmd_time_out', None)
 
         pool, image_name = image_id.split('.')
 
@@ -645,7 +646,7 @@ def disk(image_id):
                                                                      sfx)
 
             api_vars = {'pool': pool, 'size': size, 'owner': local_gw,
-                        'mode': mode}
+                        'mode': mode, 'cmd_time_out': cmd_time_out}
 
             resp_text, resp_code = call_api(gateways, '_disk',
                                             image_name,
@@ -716,7 +717,8 @@ def _disk(image_id):
                       str(request.form['pool']),
                       image_name,
                       str(request.form['size']),
-                      str(request.form['owner']))
+                      str(request.form['owner']),
+                      request.form.get('cmd_time_out', None))
             if lun.error:
                 logger.error("Unable to create a LUN instance"
                              " : {}".format(lun.error_msg))
@@ -759,7 +761,7 @@ def _disk(image_id):
         else:
 
             # this is an invalid request
-            return jsonify(message="Invalid Request - need to provide"
+            return jsonify(message="Invalid Request - need to provide "
                                    "pool, size and owner"), 400
 
     else:
