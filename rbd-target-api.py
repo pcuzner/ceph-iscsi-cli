@@ -731,7 +731,7 @@ def _disk(image_id):
             lun.allocate()
             if lun.error:
                 logger.error("LUN alloc problem - {}".format(lun.error_msg))
-                return jsonify(message="LUN allocation failure"), 500
+                return jsonify(message=lun.error_msg), 500
 
             if request.form['mode'] == 'create':
                 # new disk is allocated, so refresh the local config object
