@@ -16,6 +16,8 @@ import platform
 from functools import wraps
 from rpm import labelCompare
 import rados
+import rbd
+from nose.tools import eq_ as eq
 
 import werkzeug
 from flask import Flask, jsonify, make_response, request
@@ -949,6 +951,17 @@ def clientlun(client_iqn):
         # this is a delete request
         if disk in lun_list:
             lun_list.remove(disk)
+
+            pool_name, image_name = disk.split('.')
+            with rados.Rados(conffile=settings.config.cephconf) as cluster:
+                with cluster.open_ioctx(pool_name) as ioctx:
+                    with rbd.Image(ioctx, image_name) as image:
+
+                        if len(image.list_lockers()):
+                            lock_owners = list(image.lock_get_owners())
+                            eq(1, len(lock_owners))
+                            eq(rbd.RBD_LOCK_MODE_EXCLUSIVE, lock_owners[0]['mode'])
+                            image.lock_break(rbd.RBD_LOCK_MODE_EXCLUSIVE, lock_owners[0]['owner'])
         else:
             return jsonify(message="disk not mapped to client"), 400
 
