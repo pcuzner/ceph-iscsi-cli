@@ -24,10 +24,10 @@ from rtslib_fb.utils import RTSLibError, normalize_wwn
 import ceph_iscsi_config.settings as settings
 from ceph_iscsi_config.gateway import GWTarget
 from ceph_iscsi_config.group import Group
-from ceph_iscsi_config.lun import LUN
-from ceph_iscsi_config.client import GWClient, CHAP
+from ceph_iscsi_config.lun import LUN, define_luns
+from ceph_iscsi_config.client import GWClient, CHAP, define_clients
 from ceph_iscsi_config.common import Config
-from ceph_iscsi_config.utils import (get_ip, this_host, ipv4_addresses,
+from ceph_iscsi_config.utils import (get_ip, ipv4_addresses,
                                      gen_file_hash, valid_rpm)
 
 from gwcli.utils import (this_host, APIRequest, valid_gateway,
@@ -505,14 +505,19 @@ def _gateway(gateway_name=None):
                                                                  gateway_name))
             return jsonify(message="Failed to create the gateway"), 500
 
-        logger.info("created the gateway")
-
         if target_mode == 'target':
+            # Sync ACLs for new gateway
+            logger.info("Processing LUN configuration")
+            define_luns(logger, config, gateway)
+            logger.info("Processing client configuration")
+            define_clients(logger, config)
             # refresh only for target definitions, since that's when the config
             # will actually change
             logger.info("refreshing the configuration after the gateway "
                         "creation")
             config.refresh()
+
+        logger.info("created the gateway")
 
         return jsonify(message="Gateway defined/mapped"), 200
 
