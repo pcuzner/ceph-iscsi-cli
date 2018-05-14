@@ -247,123 +247,135 @@ def gateways():
         return jsonify(config.config['gateways']), 200
 
 
-@app.route('/api/gateway/<gateway_name>', methods=['PUT'])
+@app.route('/api/gateway/<gateway_name>', methods=['PUT', 'DELETE'])
 @requires_restricted_auth
 def gateway(gateway_name=None):
-    """
-    Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
-    The call requires the following variables to be set;
-    :param gateway_name: (str) gateway name
-    :param ip_address: (str) ipv4 dotted quad for the address iSCSI should use
-    :param nosync: (bool) whether to sync the LIO objects to the new gateway
-           default: FALSE
-    :param skipchecks: (bool) whether to skip OS/software versions checks
-           default: FALSE
-    **RESTRICTED**
-    Examples:
-    curl --insecure --user admin:admin -d ip_address=192.168.122.69 -X PUT http://192.168.122.69:5000/api/gateway/iscsi-gw0
-    """
+    if request.method == 'PUT':
+    	"""
+    	Define iscsi gateway(s) across node(s), adding TPGs, disks and clients
+    	The call requires the following variables to be set;
+    	:param gateway_name: (str) gateway name
+    	:param ip_address: (str) ipv4 dotted quad for the address iSCSI should use
+    	:param nosync: (bool) whether to sync the LIO objects to the new gateway
+    	       default: FALSE
+    	:param skipchecks: (bool) whether to skip OS/software versions checks
+    	       default: FALSE
+    	**RESTRICTED**
+    	Examples:
+    	curl --insecure --user admin:admin -d ip_address=192.168.122.69 -X PUT http://192.168.122.69:5000/api/gateway/iscsi-gw0
+    	"""
 
-    # the definition of a gateway into an existing configuration can apply the
-    # running config to the new host. The downside is that this sync task
-    # could take a while if there are 100's of disks/clients. Future work should
-    # aim to make this synchronisation of the new gateway an async task
+    	# the definition of a gateway into an existing configuration can apply the
+    	# running config to the new host. The downside is that this sync task
+    	# could take a while if there are 100's of disks/clients. Future work should
+    	# aim to make this synchronisation of the new gateway an async task
 
 
-    ip_address = request.form.get('ip_address')
-    nosync = request.form.get('nosync', False)
-    skipchecks = request.form.get('skipchecks', 'false')
+    	ip_address = request.form.get('ip_address')
+    	nosync = request.form.get('nosync', False)
+    	skipchecks = request.form.get('skipchecks', 'false')
 
-    # first confirm that the request is actually valid, if not return a 400
-    # error with the error description
-    current_config = config.config
+    	# first confirm that the request is actually valid, if not return a 400
+    	# error with the error description
+    	current_config = config.config
 
-    if skipchecks.lower() == 'true':
-        logger.warning("Gateway request received, with validity checks "
-                       "disabled")
-        gateway_usable = 'ok'
+    	if skipchecks.lower() == 'true':
+    	    logger.warning("Gateway request received, with validity checks "
+    	                   "disabled")
+    	    gateway_usable = 'ok'
+    	else:
+    	    logger.info("gateway validation needed for {}".format(gateway_name))
+    	    gateway_usable = valid_gateway(gateway_name,
+    	                                   ip_address,
+    	                                   current_config)
+
+    	if gateway_usable != 'ok':
+    	    return jsonify(message=gateway_usable), 400
+
+    	resp_text = "Gateway added"  # Assume the best!
+    	http_mode = 'https' if settings.config.api_secure else 'http'
+
+    	current_disks = config.config['disks']
+    	current_clients = config.config['clients']
+    	target_iqn = config.config['gateways'].get('iqn')
+
+    	total_objects = (len(current_disks.keys()) +
+    	                 len(current_clients.keys()))
+
+    	# if the config is empty, it doesn't matter what nosync is set to
+    	if total_objects == 0:
+    	    nosync = True
+
+    	gateway_ip_list = config.config['gateways'].get('ip_list', [])
+
+    	gateway_ip_list.append(ip_address)
+
+    	first_gateway = (len(gateway_ip_list) == 1)
+
+    	if first_gateway:
+    	    gateways =['127.0.0.1']
+    	else:
+    	    gateways = gateway_ip_list
+
+    	api_vars = {"target_iqn": target_iqn,
+    	            "gateway_ip_list": ",".join(gateway_ip_list),
+    	            "mode": "target"}
+
+    	resp_text, resp_code = call_api(gateways, '_gateway',
+    	                                gateway_name,
+    	                                http_method='put',
+    	                                api_vars=api_vars)
+
+    	if resp_code == 200:
+    	    # GW definition has been added, so before we declare victory we need
+    	    # to sync tpg's to the existing gateways and sync the disk and client
+    	    # configuration to the new gateway
+
+    	    if len(current_disks.keys()) > 0:
+    	        # there are disks in the environment, so we need to add them to the
+    	        # new tpg created when the new gateway was added
+    	        seed_gateways = [ip for ip in gateways if ip != ip_address]
+
+    	        resp_text, resp_code = seed_tpg(seed_gateways,
+    	                                        gateway_name,
+    	                                        api_vars)
+
+    	        if resp_code != 200:
+    	            return jsonify(message="TPG sync failed on existing gateways"), \
+    	                   resp_code
+
+    	    # No check to see if the new gateway needs to be synchronised as part
+    	    # of this request
+    	    if nosync:
+    	        # no further action needed
+    	        return jsonify(message="Gateway creation {}".format(resp_text)), \
+    	               resp_code
+    	    else:
+
+    	        resp_text, resp_code = seed_disks(current_disks,
+    	                                          ip_address)
+
+    	        if resp_code != 200:
+    	            return jsonify(message="Disk mapping {}".format(resp_text)), \
+    	                   resp_code
+    	        else:
+    	            # disks added, so seed the clients on the new gateway
+    	            resp_text, resp_code = seed_clients(current_clients,
+    	                                                ip_address)
+
+    	else:
+
+    	    return jsonify(message="Gateway creation {}".format(resp_text)), \
+    	           resp_code
     else:
-        logger.info("gateway validation needed for {}".format(gateway_name))
-        gateway_usable = valid_gateway(gateway_name,
-                                       ip_address,
-                                       current_config)
+        # DELETE gateway request
+        resp_text = "Gateway deleted"  # Assume the best!
+        http_mode = 'https' if settings.config.api_secure else 'http'
 
-    if gateway_usable != 'ok':
-        return jsonify(message=gateway_usable), 400
-
-    resp_text = "Gateway added"  # Assume the best!
-    http_mode = 'https' if settings.config.api_secure else 'http'
-
-    current_disks = config.config['disks']
-    current_clients = config.config['clients']
-    target_iqn = config.config['gateways'].get('iqn')
-
-    total_objects = (len(current_disks.keys()) +
-                     len(current_clients.keys()))
-
-    # if the config is empty, it doesn't matter what nosync is set to
-    if total_objects == 0:
-        nosync = True
-
-    gateway_ip_list = config.config['gateways'].get('ip_list', [])
-
-    gateway_ip_list.append(ip_address)
-
-    first_gateway = (len(gateway_ip_list) == 1)
-
-    if first_gateway:
-        gateways =['127.0.0.1']
-    else:
-        gateways = gateway_ip_list
-
-    api_vars = {"target_iqn": target_iqn,
-                "gateway_ip_list": ",".join(gateway_ip_list),
-                "mode": "target"}
-
-    resp_text, resp_code = call_api(gateways, '_gateway',
-                                    gateway_name,
-                                    http_method='put',
-                                    api_vars=api_vars)
-
-    if resp_code == 200:
-        # GW definition has been added, so before we declare victory we need
-        # to sync tpg's to the existing gateways and sync the disk and client
-        # configuration to the new gateway
-
-        if len(current_disks.keys()) > 0:
-            # there are disks in the environment, so we need to add them to the
-            # new tpg created when the new gateway was added
-            seed_gateways = [ip for ip in gateways if ip != ip_address]
-
-            resp_text, resp_code = seed_tpg(seed_gateways,
-                                            gateway_name,
-                                            api_vars)
-
-            if resp_code != 200:
-                return jsonify(message="TPG sync failed on existing gateways"), \
-                       resp_code
-
-        # No check to see if the new gateway needs to be synchronised as part
-        # of this request
-        if nosync:
-            # no further action needed
-            return jsonify(message="Gateway creation {}".format(resp_text)), \
-                   resp_code
-        else:
-
-            resp_text, resp_code = seed_disks(current_disks,
-                                              ip_address)
-
-            if resp_code != 200:
-                return jsonify(message="Disk mapping {}".format(resp_text)), \
-                       resp_code
-            else:
-                # disks added, so seed the clients on the new gateway
-                resp_text, resp_code = seed_clients(current_clients,
-                                                    ip_address)
-
-    else:
-
+        gateway = [get_ip(gateway_name)]
+        resp_text, resp_code = call_api(gateway, '_gateway',
+                                        gateway_name,
+                                        http_method='delete')
         return jsonify(message="Gateway creation {}".format(resp_text)), \
                resp_code
 
