@@ -384,7 +384,7 @@ class Disks(UIGroup):
         An empty value for an attribute resets the lun attribute to its
         default.
 
-        image_id  : disk name (pool.image format)
+        image_id  : disk name (pool.image_id format)
         attribute : attribute to reconfigure. supported attributes:
             - max_data_area_mb : integer, size of kernel data ring buffer (MiB).
         value     : value of the attribute to reconfigure
